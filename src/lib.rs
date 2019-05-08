@@ -3,11 +3,16 @@
 extern crate wabt;
 extern crate wasmer_runtime;
 
-use wasmer_runtime::{imports, instantiate, Value};
+#[macro_use]
+use wasmer_runtime::{func, imports, instantiate, Ctx, Value};
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn subtract(_: &mut Ctx, a: i32, b: i32) -> i32 {
+        a - b
+    }
 
     #[test]
     fn test_multiple_wasm_modules() {
@@ -21,6 +26,9 @@ mod tests {
         let import_object = imports! {
             "ns1" => add_instance,
             "ns2" => mul_instance,
+            "ns3" => {
+                "sub" => func!(subtract),
+            },
         };
 
         let calc_instance = instantiate(&calc_wasm, &import_object).unwrap();
@@ -35,7 +43,12 @@ mod tests {
             .call(&[Value::I32(1), Value::I32(10), Value::I32(20)])
             .unwrap();
 
+        let sub_res = func
+            .call(&[Value::I32(2), Value::I32(30), Value::I32(10)])
+            .unwrap();
+
         assert_eq!(vec![Value::I32(30)], add_res);
         assert_eq!(vec![Value::I32(200)], mul_res);
+        assert_eq!(vec![Value::I32(20)], sub_res);
     }
 }
