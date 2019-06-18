@@ -4,7 +4,7 @@ extern crate wabt;
 extern crate wasmer_runtime;
 
 #[macro_use]
-use wasmer_runtime::{func, imports, instantiate, Ctx, Value};
+use wasmer_runtime::{func, Func, imports, instantiate, Ctx, Value, Instance};
 
 #[cfg(test)]
 mod tests {
@@ -14,11 +14,18 @@ mod tests {
         a - b
     }
 
+    macro_rules! load_wasm {
+        ($file:expr) => {{
+            let wasm = wabt::wat2wasm(include_bytes!($file).as_ref()).unwrap();
+            wasm
+        }};
+    }
+
     #[test]
-    fn test_multiple_wasm_modules() {
-        let add_wasm = wabt::wat2wasm(include_bytes!("modules/add.wast").as_ref()).unwrap();
-        let mul_wasm = wabt::wat2wasm(include_bytes!("modules/mul.wast").as_ref()).unwrap();
-        let calc_wasm = wabt::wat2wasm(include_bytes!("modules/calc.wast").as_ref()).unwrap();
+    fn test_multiple_stateless_wasm_modules() {
+        let add_wasm = load_wasm!("modules/add.wast");
+        let mul_wasm = load_wasm!("modules/mul.wast");
+        let calc_wasm = load_wasm!("modules/calc.wast");
 
         let add_instance = instantiate(&add_wasm, &imports! {}).unwrap();
         let mul_instance = instantiate(&mul_wasm, &imports! {}).unwrap();
@@ -50,5 +57,77 @@ mod tests {
         assert_eq!(vec![Value::I32(30)], add_res);
         assert_eq!(vec![Value::I32(200)], mul_res);
         assert_eq!(vec![Value::I32(20)], sub_res);
+    }
+
+    fn inc_and_get(instance: &Instance) -> i32 {
+        let get_func = instance.dyn_func("get").unwrap();
+        let inc_func = instance.dyn_func("inc").unwrap();
+
+        inc_func.call(&[]).unwrap();
+
+        let res = get_func.call(&[]).unwrap();
+
+        assert_eq!(1, res.len());
+
+        if let Value::I32(val) = res[0] {
+            val
+        } else {
+            panic!()
+        }
+    }
+
+    fn wrapping_inc_and_get(instance: &Instance) -> i32 {
+        let get_func = instance.dyn_func("wrapping_get").unwrap();
+        let inc_func = instance.dyn_func("wrapping_inc").unwrap();
+
+        inc_func.call(&[]).unwrap();
+
+        let res = get_func.call(&[]).unwrap();
+
+        assert_eq!(1, res.len());
+
+        if let Value::I32(val) = res[0] {
+            val
+        } else {
+            panic!()
+        }
+    }
+
+    #[test]
+    fn test_two_isolated_stateful_instances_of_the_same_wasm_module() {
+        let wasm = load_wasm!("modules/counter.wast");
+        let instance1 = instantiate(&wasm, &imports! {}).unwrap();
+        let instance2 = instantiate(&wasm, &imports! {}).unwrap();
+
+        let res = inc_and_get(&instance1);
+        assert_eq!(1, res);
+
+        let res = inc_and_get(&instance1);
+        assert_eq!(2, res);
+
+        let res = inc_and_get(&instance2);
+        assert_eq!(1, res);
+    }
+
+    #[test]
+    fn test_shared_stateful_wasm_instance() {
+        let wrapped_wasm = load_wasm!("modules/counter.wast");
+        let wrapped_instance = instantiate(&wrapped_wasm, &imports! {}).unwrap();
+
+        let res = inc_and_get(&wrapped_instance);
+        assert_eq!(1, res);
+
+        let res = inc_and_get(&wrapped_instance);
+        assert_eq!(2, res);
+
+        let wasm = load_wasm!("modules/wrapping_counter.wast");
+        let import_object = imports! {
+            "ns" => wrapped_instance,
+        };
+
+        let instance = instantiate(&wasm, &import_object).unwrap();
+
+        let res = wrapping_inc_and_get(&instance);
+        assert_eq!(3, res);
     }
 }
